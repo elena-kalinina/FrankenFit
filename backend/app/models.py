@@ -1,0 +1,219 @@
+"""
+Shared Pydantic request / response models for the Franken-Fit API.
+
+All models reflect the demo data-flow in BATTLE_PLAN.md — fill the
+stub service functions in backend/app/services/ to make them live.
+"""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# Garment analysis  (POST /v1/wardrobe/analyze)
+# ---------------------------------------------------------------------------
+
+class GarmentDescription(BaseModel):
+    """Structured garment metadata returned by Gemini vision."""
+
+    garment_id: str = Field(description="UUID assigned by the backend on ingest.")
+    title: str = Field(description="Short marketable title, ≤ 80 chars.")
+    description: str = Field(description="Listing-ready paragraph description.")
+    category: str = Field(description="Top-level category, e.g. 'Tops', 'Bottoms'.")
+    style: str = Field(description="Style descriptor, e.g. 'Pullover', 'Blazer'.")
+    brand: str = Field(default="Unbranded")
+    color: str = Field(default="Multicolor")
+    size: str = Field(default="M")
+    material: str = Field(default="Unknown")
+    department: str = Field(default="Women", description="eBay Department specific.")
+    condition: str = Field(default="Used", description="Human-readable condition label.")
+    condition_id: str = Field(default="3000", description="eBay ConditionID.")
+    suggested_price: float = Field(default=19.99)
+    currency: str = Field(default="USD")
+    roast_line: str = Field(default="", description="Gemini TTS comedy line for the swipe card.")
+    raw: dict[str, Any] = Field(default_factory=dict, description="Raw Gemini JSON blob.")
+
+
+class AnalyzeResponse(BaseModel):
+    session_id: str
+    garments: list[GarmentDescription]
+
+
+# ---------------------------------------------------------------------------
+# Swipe  (POST /v1/wardrobe/swipe)
+# ---------------------------------------------------------------------------
+
+class SwipeDirection(str, Enum):
+    LIKE = "like"
+    DISLIKE = "dislike"
+
+
+class SwipeRequest(BaseModel):
+    session_id: str
+    garment_id: str
+    direction: SwipeDirection
+    garment_meta: GarmentDescription | None = Field(
+        default=None,
+        description="Optional full garment payload; only needed if the garment was never analyzed.",
+    )
+
+
+class SwipeResponse(BaseModel):
+    session_id: str
+    garment_id: str
+    direction: SwipeDirection
+    keepers_count: int
+    franken_bin_count: int
+    taste_signal_appended: bool = Field(
+        default=False,
+        description="True when the swipe was also written to the Pioneer JSONL dataset.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Price band  (embedded in ListingDraftResponse + returned by Tavily service)
+# ---------------------------------------------------------------------------
+
+class PriceBand(BaseModel):
+    min: float
+    median: float
+    suggested: float
+    max: float
+    currency: str = "USD"
+    sources: list[str] = Field(default_factory=list, description="URLs Tavily pulled comps from.")
+
+
+# ---------------------------------------------------------------------------
+# Listing draft  (POST /v1/listings/draft)
+# ---------------------------------------------------------------------------
+
+class ListingDraftRequest(BaseModel):
+    session_id: str
+    garment_id: str
+    marketplace: str = Field(
+        default="ebay",
+        description="Target marketplace hint for copy tone. One of: ebay, vinted, kleinanzeigen, depop.",
+    )
+    run_tavily: bool = Field(default=True, description="Whether to fetch live Tavily price comps.")
+
+
+class MarketplaceCopy(BaseModel):
+    platform: str
+    title: str
+    description: str
+    hashtags: list[str] = Field(default_factory=list)
+
+
+class ListingDraft(BaseModel):
+    garment_id: str
+    title: str
+    description: str
+    suggested_price: float
+    currency: str
+    hashtags: list[str] = Field(default_factory=list)
+    marketplace_copies: list[MarketplaceCopy] = Field(default_factory=list)
+    ebay_item_specifics: dict[str, str] = Field(
+        default_factory=dict,
+        description="Ready-to-post eBay ItemSpecifics (Brand, Size, Color, …).",
+    )
+
+
+class ListingDraftResponse(BaseModel):
+    draft: ListingDraft
+    price_band: PriceBand | None = None
+
+
+# ---------------------------------------------------------------------------
+# Listing publish  (POST /v1/listings/publish)
+# ---------------------------------------------------------------------------
+
+class PublishRequest(BaseModel):
+    session_id: str
+    garment_id: str
+    dry_run: bool = Field(
+        default=True,
+        description="When True, calls VerifyAddFixedPriceItem; when False, calls AddFixedPriceItem.",
+    )
+
+
+class PublishResponse(BaseModel):
+    ack: str = Field(description="'Success', 'Warning', or 'Failure'.")
+    item_id: str | None = None
+    errors: list[dict[str, str]] = Field(default_factory=list)
+    sandbox_url: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Upcycle  (POST /v1/upcycle/generate)
+# ---------------------------------------------------------------------------
+
+class UpcycleRequest(BaseModel):
+    session_id: str
+    garment_ids: list[str] = Field(
+        min_length=1,
+        description="IDs of tossed garments to combine into the upcycled design (1–5).",
+    )
+    style_prompt: str = Field(
+        default="",
+        description="Optional freeform style direction merged with the fal FLUX.2 prompt.",
+    )
+
+
+class UpcycleResponse(BaseModel):
+    session_id: str
+    image_url: str
+    revised_prompt: str = ""
+    seed: int | None = None
+    model: str = "fal-ai/flux-pro/v1.1-ultra"
+
+
+# ---------------------------------------------------------------------------
+# Animate  (POST /v1/upcycle/animate)
+# ---------------------------------------------------------------------------
+
+class AnimateRequest(BaseModel):
+    session_id: str
+    image_url: str
+    model: str = Field(
+        default="minimax/video-01",
+        description="fal.ai I2V model slug. Options: minimax/video-01, fal-ai/luma-dream-machine/ray-2, fal-ai/kling-video/v2.1/master/image-to-video.",
+    )
+    duration: int = Field(default=10, description="Clip duration in seconds (model-dependent max).")
+    aspect_ratio: str = Field(default="9:16")
+
+
+class AnimateResponse(BaseModel):
+    session_id: str
+    video_url: str
+    model: str
+    duration_s: int
+
+
+# ---------------------------------------------------------------------------
+# Pioneer preference classification  (POST /v1/preferences/classify)
+# ---------------------------------------------------------------------------
+
+class ClassifyRequest(BaseModel):
+    session_id: str
+    garment_id: str
+    text: str = Field(description="Garment description text to classify.")
+    use_trained_model: bool = Field(
+        default=False,
+        description="When True, calls the LoRA-trained model; otherwise calls the base model.",
+    )
+
+
+class ClassifyResponse(BaseModel):
+    garment_id: str
+    label: str = Field(description="Predicted preference label: love, meh, or hate.")
+    confidence: float | None = None
+    model_id: str
+    baseline_label: str | None = Field(
+        default=None,
+        description="Baseline model prediction for side-by-side display.",
+    )
+    baseline_confidence: float | None = None
