@@ -39,10 +39,18 @@ class Settings(BaseSettings):
     pioneer_api_key: str = Field(default="", alias="PIONEER_API_KEY")
     pioneer_api_base: str = Field(default="https://api.pioneer.ai", alias="PIONEER_API_BASE")
     pioneer_base_model: str = Field(default="fastino/gliner2-base-v1", alias="PIONEER_BASE_MODEL")
-    pioneer_trained_model_id: str = Field(
+    pioneer_qwen_model: str = Field(
         default="",
+        alias="PIONEER_QWEN_MODEL",
+        description="Qwen model ID from Pioneer dashboard — used as Day-1 live inference baseline.",
+    )
+    pioneer_trained_model_id: str = Field(
+        default="941f616d-4c09-43eb-9155-80a623efde83",
         alias="PIONEER_TRAINED_MODEL_ID",
-        description="Set to the training_job_id once the Day-1 fine-tune completes.",
+        description=(
+            "Fine-tuned GLiNER model (training_job_id). "
+            "Pre-hackathon test value is set as default; update after Day-1 fine-tune."
+        ),
     )
 
     # --- eBay Sandbox ---
