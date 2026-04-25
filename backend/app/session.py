@@ -26,8 +26,10 @@ class SwipeEvent:
 class DemoSession:
     session_id: str
     garments: dict[str, dict[str, Any]] = field(default_factory=dict)
+    garment_local_paths: dict[str, str] = field(default_factory=dict)
     swipes: list[SwipeEvent] = field(default_factory=list)
     upcycle_image_url: str | None = None
+    upcycle_garment_id: str | None = None
     upcycle_video_url: str | None = None
     listing_draft: dict[str, Any] | None = None
     price_band: dict[str, Any] | None = None

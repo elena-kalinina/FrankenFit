@@ -2,39 +2,36 @@
 Listing routes.
 
 POST /v1/listings/draft    — garment + Tavily comps → listing draft (Gemini copy)
-POST /v1/listings/publish  — push draft to eBay Sandbox (dry-run or live)
+POST /v1/listings/publish  — push draft to eBay Sandbox (dry-run by default)
 """
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
+from backend.app.config import get_settings
 from backend.app.models import (
     GarmentDescription,
     ListingDraft,
     ListingDraftRequest,
     ListingDraftResponse,
-    MarketplaceCopy,
     PriceBand,
     PublishRequest,
     PublishResponse,
 )
+from backend.app.services import ebay, gemini, tavily
 from backend.app.session import get_session
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.post("/draft", response_model=ListingDraftResponse)
 async def draft_listing(body: ListingDraftRequest) -> ListingDraftResponse:
-    """
-    Generate a ready-to-post listing draft from garment metadata + Tavily price comps.
-
-    Hackathon day implementation steps:
-      1. Retrieve garment from session by garment_id.
-      2. If body.run_tavily: call services.tavily.fetch_resale_comps(garment, api_key=...)
-      3. Call services.gemini.generate_listing_copy(garment, price_band, api_key=..., marketplace=...)
-      4. Populate draft.ebay_item_specifics via services.gemini.build_ebay_item_specifics(garment).
-      5. Store draft in session; return ListingDraftResponse.
+    """Generate a marketplace-ready listing draft from garment metadata + live
+    Tavily price comps, with Gemini-generated copy per marketplace.
     """
     session = get_session(body.session_id)
     if not session:
@@ -47,42 +44,49 @@ async def draft_listing(body: ListingDraftRequest) -> ListingDraftResponse:
             detail=f"Garment {body.garment_id!r} not found in session {body.session_id!r}.",
         )
 
+    settings = get_settings()
+    if not settings.gemini_api_key:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY missing on backend.")
+
     garment = GarmentDescription(**raw_garment)
 
-    # --- stub price band ---
-    price_band = PriceBand(
-        min=garment.suggested_price * 0.6,
-        median=garment.suggested_price * 0.9,
-        suggested=garment.suggested_price,
-        max=garment.suggested_price * 1.4,
-        currency=garment.currency,
-        sources=[],
-    )
-
-    # --- stub listing draft ---
-    draft = ListingDraft(
-        garment_id=garment.garment_id,
-        title=garment.title,
-        description=garment.description,
-        suggested_price=price_band.suggested,
-        currency=garment.currency,
-        hashtags=["#secondhand", "#sustainable", "#frankenfit"],
-        marketplace_copies=[
-            MarketplaceCopy(
-                platform=body.marketplace,
-                title=garment.title,
-                description="Implement: wire Gemini copy generation (see implementation_notes.md).",
-                hashtags=["#secondhand"],
+    price_band: PriceBand | None = None
+    if body.run_tavily and settings.tavily_api_key:
+        try:
+            price_band = await tavily.fetch_resale_comps(
+                garment,
+                api_key=settings.tavily_api_key,
+                marketplace="any",
+                region="eu",
+                currency=garment.currency,
             )
-        ],
-        ebay_item_specifics={
-            "Brand": garment.brand,
-            "Department": garment.department,
-            "Style": garment.style,
-            "Size": garment.size,
-            "Color": garment.color,
-        },
-    )
+        except Exception as exc:  # noqa: BLE001 — Tavily failures shouldn't block the listing
+            logger.warning("Tavily price comps failed: %s", exc)
+            price_band = None
+
+    # Fallback price band — keeps the demo flowing if Tavily returns nothing.
+    if price_band is None:
+        price_band = PriceBand(
+            min=round(garment.suggested_price * 0.6, 2),
+            median=round(garment.suggested_price * 0.9, 2),
+            suggested=round(garment.suggested_price, 2),
+            max=round(garment.suggested_price * 1.4, 2),
+            currency=garment.currency,
+            sources=[],
+        )
+
+    try:
+        draft: ListingDraft = await gemini.generate_listing_copy(
+            garment,
+            price_band,
+            api_key=settings.gemini_api_key,
+            marketplace=body.marketplace,
+            model=settings.gemini_vision_model,
+            fallback_models=settings.gemini_vision_fallback_models,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Gemini listing copy failed")
+        raise HTTPException(status_code=502, detail=f"Gemini listing copy error: {exc}") from exc
 
     session.listing_draft = draft.model_dump()
     session.price_band = price_band.model_dump()
@@ -92,19 +96,7 @@ async def draft_listing(body: ListingDraftRequest) -> ListingDraftResponse:
 
 @router.post("/publish", response_model=PublishResponse)
 async def publish_listing(body: PublishRequest) -> PublishResponse:
-    """
-    Push the session's listing draft to eBay Sandbox.
-
-    Hackathon day implementation steps:
-      1. Retrieve draft from session.
-      2. Call services.ebay.publish_listing(draft, ..., dry_run=body.dry_run).
-      3. If successful, store sandbox_url in session.
-      4. Return PublishResponse.
-
-    Pre-demo checklist (from BATTLE_PLAN.md):
-      - Run func_test/test_ebay_sandbox_listing.py --publish first to confirm token is valid.
-      - category_id must be a LEAF — use --suggest-category if 87 comes back.
-    """
+    """Push the session's listing draft to eBay Sandbox via Trading API."""
     session = get_session(body.session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {body.session_id!r} not found.")
@@ -115,10 +107,29 @@ async def publish_listing(body: PublishRequest) -> PublishResponse:
             detail="No listing draft in session. Call POST /v1/listings/draft first.",
         )
 
-    # --- stub response ---
-    return PublishResponse(
-        ack="stub",
-        item_id=None,
-        errors=[{"severity": "Info", "code": "0", "short": "Stub — implement services.ebay.publish_listing."}],
-        sandbox_url=None,
-    )
+    settings = get_settings()
+    draft = ListingDraft(**session.listing_draft)
+
+    raw_garment = session.garments.get(body.garment_id) or session.garments.get(draft.garment_id)
+    condition_id = (raw_garment or {}).get("condition_id", "3000") if raw_garment else "3000"
+
+    try:
+        result = await ebay.publish_listing(
+            draft,
+            app_id=settings.ebay_app_id,
+            dev_id=settings.ebay_dev_id,
+            cert_id=settings.ebay_cert_id,
+            user_token=settings.ebay_user_token,
+            site_id=settings.ebay_site_id,
+            category_id=settings.ebay_category_id,
+            condition_id=str(condition_id),
+            dry_run=body.dry_run,
+            sandbox=settings.ebay_env == "sandbox",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("eBay publish failed")
+        raise HTTPException(status_code=502, detail=f"eBay publish error: {exc}") from exc
+
+    if result.sandbox_url:
+        session.upcycle_video_url = session.upcycle_video_url  # noop, kept for symmetry
+    return result

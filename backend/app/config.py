@@ -20,9 +20,53 @@ class Settings(BaseSettings):
 
     # --- Core partners ---
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.5-flash-preview-04-17", alias="GEMINI_MODEL")
-    gemini_tts_model: str = Field(default="gemini-3.1-flash-tts-preview", alias="GEMINI_TTS_MODEL")
-    gemini_tts_voice: str = Field(default="Aoede", alias="GEMINI_TTS_VOICE")
+    gemini_vision_model: str = Field(
+        default="gemini-3-flash-preview",
+        alias="GEMINI_VISION_MODEL",
+        description=(
+            "Primary vision + text Gemini model. Default is gemini-3-flash-preview "
+            "(full Flash, healthy capacity). Falls back to GEMINI_VISION_FALLBACK_MODEL "
+            "on transient 503/UNAVAILABLE / RESOURCE_EXHAUSTED errors."
+        ),
+    )
+    gemini_vision_fallback_models_csv: str = Field(
+        default="gemini-3.1-flash-lite-preview,gemini-2.5-flash",
+        alias="GEMINI_VISION_FALLBACK_MODELS",
+        description=(
+            "Comma-separated chain of vision/text fallback models. Walked left-to-right "
+            "when the primary 503s / 429s. Default chain ends at gemini-2.5-flash (GA, "
+            "highest free-tier daily quota) so the demo never dies on Gemini availability."
+        ),
+    )
+
+    @property
+    def gemini_vision_fallback_models(self) -> list[str]:
+        return [m.strip() for m in self.gemini_vision_fallback_models_csv.split(",") if m.strip()]
+    gemini_tts_model: str = Field(
+        default="gemini-2.5-flash-preview-tts",
+        alias="GEMINI_TTS_MODEL",
+        description=(
+            "Primary Gemini TTS model. All preview-tier TTS models live on tiny "
+            "per-day free quotas (~10 req/day), so we chain them via "
+            "GEMINI_TTS_FALLBACK_MODELS — when the primary is exhausted, the "
+            "next model in the chain serves the render."
+        ),
+    )
+    gemini_tts_fallback_models_csv: str = Field(
+        default="gemini-3.1-flash-tts-preview,gemini-2.5-pro-preview-tts",
+        alias="GEMINI_TTS_FALLBACK_MODELS",
+        description=(
+            "Comma-separated TTS fallback chain. Walked left-to-right when the "
+            "primary 503s / 429s. Each preview TTS model has its own per-day "
+            "quota pool, so rotating across them effectively gives us 3× the "
+            "free-tier capacity for the demo's per-garment roast renders."
+        ),
+    )
+    gemini_tts_voice: str = Field(default="Puck", alias="GEMINI_TTS_VOICE")
+
+    @property
+    def gemini_tts_fallback_models(self) -> list[str]:
+        return [m.strip() for m in self.gemini_tts_fallback_models_csv.split(",") if m.strip()]
 
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
 
@@ -50,6 +94,16 @@ class Settings(BaseSettings):
         description=(
             "Fine-tuned GLiNER model (training_job_id). "
             "Pre-hackathon test value is set as default; update after Day-1 fine-tune."
+        ),
+    )
+    pioneer_per_call_timeout_seconds: float = Field(
+        default=15.0,
+        alias="PIONEER_PER_CALL_TIMEOUT_SECONDS",
+        description=(
+            "Per-model deadline for the Pioneer side-by-side. Each call (baseline / "
+            "trained) gets its own asyncio.wait_for at this value, so a slow Qwen "
+            "doesn't drag the trained response down with it. The two calls run "
+            "concurrently, so total latency stays close to this number."
         ),
     )
 

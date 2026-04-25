@@ -1,0 +1,8 @@
+{
+  "session_id": "af5625d0-fe17-486b-89d8-24347d0cd692",
+  "garment_id": "fa5400fc-fe22-4fc3-853d-f5761c1cd297",
+  "image_url": "/static/upcycle/upcycle_hero.jpg",
+  "revised_prompt": "Photorealistic editorial fashion shot of a deconstructed avant-garde gown displayed against a neutral grey studio background. The garment is an upcycled masterpiece featuring a structured bodice made from a charcoal-to-cyan gradient sweatshirt with exposed, raw-edge seams. Exaggerated, architectural shoulders are crafted from crisp white embroidered cotton, transitioning into voluminous, floor-length asymmetrical draping. Layers of tattered, sheer pink and black floral tie-dye chiffon cascade from the waist and sleeves, creating a dark romantic silhouette. Dramatic chiaroscuro lighting emphasizes the high-contrast textures of heavy jersey, delicate eyelet embroidery, and ethereal silk. Sharp focus on intricate stitching and clashing fabric patterns, 8k resolution, cinematic runway aesthetic.",
+  "seed": 1959992804,
+  "model": "fal-ai/flux-2-flex/edit"
+}

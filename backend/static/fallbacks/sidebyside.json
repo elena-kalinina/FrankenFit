@@ -1,0 +1,8 @@
+{
+  "garment_id": "dc12086f-03cd-4f07-9c48-3308100d8461",
+  "label": "meh",
+  "confidence": 0.58,
+  "model_id": "941f616d-4c09-43eb-9155-80a623efde83",
+  "baseline_label": "love",
+  "baseline_confidence": 0.92
+}

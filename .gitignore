@@ -1,0 +1,44 @@
+# --- Secrets & local env ---
+.env
+.env.local
+
+# --- Python ---
+.venv
+venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# --- Node / frontend tooling (real frontend lives in Lovable, not in this repo) ---
+node_modules/
+frontend/
+
+# --- IDE & OS ---
+.idea/
+.vscode/
+.DS_Store
+**/.DS_Store
+*.log
+
+# --- Planning / scratch (not for repo) ---
+BATTLE_PLAN.md
+LOVABLE_IMPLEMENTATION_PLAN.md
+implementation_notes.md
+my_todos.txt
+
+# --- Local functional / integration workbench (not part of shipped backend) ---
+func_test/
+
+# --- Runtime artifacts served under /static ---
+# Only canonical fallback assets are shipped (cinematic TTS, hero JPG/MP4, fallback JSONs).
+# Everything else under /static is per-session demo data and must NOT be committed.
+backend/static/uploads/
+backend/static/tts/garment/
+backend/static/upcycle/*
+!backend/static/upcycle/upcycle_hero.jpg
+backend/static/video/*
+!backend/static/video/upcycle_hero.mp4
