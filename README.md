@@ -1,6 +1,13 @@
 # Franken-Fit
 
-Hackathon project — a sustainable second-hand fashion app. The user uploads photos of clothes they don't wear, a sarcastic stylist roasts each piece, the user swipes LIKE / DISLIKE, and the rejected items are recombined ("Franken-fitted") into a single new outfit using image-to-image plus image-to-video generation. If the user rejects it, items get marketplace-ready resale listings (eBay Sandbox).
+Hackathon project — a sustainable second-hand fashion app. The user uploads photos of clothes they don't wear, a sarcastic stylist roasts each piece, the user swipes LIKE / DISLIKE, and the rejected items are recombined ("Franken-fitted") into a single new outfit using image-to-image plus image-to-video generation. Liked items get marketplace-ready resale listings (eBay Sandbox).
+
+<table>
+  <tr>
+    <td><img src="img/Screenshot 2026-04-26 at 10.49.46.png" width="320"/></td>
+    <td><img src="img/Screenshot 2026-04-26 at 10.50.04.png" width="320"/></td>
+  </tr>
+</table>
 
 This repo is the **FastAPI backend** plus pre-rendered demo assets. The frontend is built separately in [Lovable](https://lovable.dev) and points at this backend over CORS — see *Frontend* below.
 
