@@ -30,8 +30,8 @@ class GarmentDescription(BaseModel):
     size: str = Field(default="M")
     material: str = Field(default="Unknown")
     department: str = Field(default="Women", description="eBay Department specific.")
-    condition: str = Field(default="Used", description="Human-readable condition label.")
-    condition_id: str = Field(default="3000", description="eBay ConditionID.")
+    condition: str = Field(default="New with tags", description="Human-readable condition label.")
+    condition_id: str = Field(default="1000", description="eBay ConditionID. 1000=New with tags (no condition descriptors needed).")
     suggested_price: float = Field(default=19.99)
     currency: str = Field(default="USD")
     roast_line: str = Field(default="", description="Gemini TTS comedy line for the swipe card.")
@@ -138,6 +138,10 @@ class ListingDraft(BaseModel):
         default_factory=dict,
         description="Ready-to-post eBay ItemSpecifics (Brand, Size, Color, …).",
     )
+    image_url: str | None = Field(
+        default=None,
+        description="Public HTTPS URL of the garment photo for eBay PictureDetails.",
+    )
 
 
 class ListingDraftResponse(BaseModel):
@@ -155,6 +159,10 @@ class PublishRequest(BaseModel):
     dry_run: bool = Field(
         default=True,
         description="When True, calls VerifyAddFixedPriceItem; when False, calls AddFixedPriceItem.",
+    )
+    condition_id: str | None = Field(
+        default=None,
+        description="Override eBay condition ID. If omitted, falls back to the garment's condition_id or '2500'.",
     )
 
 

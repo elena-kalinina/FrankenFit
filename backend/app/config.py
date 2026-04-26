@@ -115,6 +115,7 @@ class Settings(BaseSettings):
     ebay_env: str = Field(default="sandbox", alias="EBAY_ENV")
     ebay_site_id: str = Field(default="0", alias="EBAY_SITE_ID")
     ebay_category_id: str = Field(default="15724", alias="EBAY_CATEGORY_ID")
+    ngrok_url: str | None = Field(default=None, alias="NGROK_URL")
 
 
 @lru_cache(maxsize=1)

@@ -23,6 +23,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import time
 import uuid
 import wave
@@ -37,6 +38,51 @@ from backend.app.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_json(text: str) -> dict[str, Any]:
+    """Parse the first complete JSON object from text.
+
+    Gemini occasionally appends commentary or a second object after the main
+    JSON block even when response_mime_type='application/json' is set.  This
+    helper finds the first '{...}' span and parses only that.
+    """
+    text = text.strip()
+    # Strip markdown fences if present
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```\s*$", "", text)
+    text = text.strip()
+    # Try direct parse first (fast path)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Walk forward to find balanced first object
+    start = text.find("{")
+    if start == -1:
+        raise ValueError(f"No JSON object found in Gemini response: {text[:200]!r}")
+    depth = 0
+    in_str = False
+    escape = False
+    for i, ch in enumerate(text[start:], start):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_str:
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start : i + 1])
+    raise ValueError(f"Unbalanced JSON in Gemini response: {text[:200]!r}")
 
 DEFAULT_VISION_MODEL = "gemini-3-flash-preview"
 # Tried left-to-right when the primary 503s / 429s. Last entry is the emergency
@@ -343,7 +389,7 @@ def _analyze_garment_sync(
     text = (getattr(resp, "text", None) or "").strip()
     if not text:
         raise RuntimeError("Gemini returned empty response for garment analysis.")
-    return json.loads(text)
+    return _extract_json(text)
 
 
 async def analyze_garment(
@@ -477,7 +523,7 @@ def _generate_listing_copy_sync(
     text = (getattr(resp, "text", "") or "").strip()
     if not text:
         raise RuntimeError("Gemini returned empty response for listing copy.")
-    return json.loads(text)
+    return _extract_json(text)
 
 
 async def generate_listing_copy(

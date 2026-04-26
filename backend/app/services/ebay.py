@@ -66,8 +66,13 @@ def _build_item_xml(
     condition_id: str,
     quantity: int,
     item_specifics: dict[str, str | list[str]] | None,
+    picture_url: str | None = None,
 ) -> str:
     specifics_xml = _build_item_specifics_xml(item_specifics)
+    picture_xml = (
+        f"    <PictureDetails><PictureURL>{_xml_escape(picture_url)}</PictureURL></PictureDetails>\n"
+        if picture_url else ""
+    )
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <{call_name}Request xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -90,7 +95,7 @@ def _build_item_xml(
     <PaymentMethods>CreditCard</PaymentMethods>
     <PostalCode>{_xml_escape(postal_code)}</PostalCode>
     <Quantity>{int(quantity)}</Quantity>
-    <ReturnPolicy>
+{picture_xml}    <ReturnPolicy>
       <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
       <RefundOption>MoneyBack</RefundOption>
       <ReturnsWithinOption>Days_30</ReturnsWithinOption>
@@ -150,7 +155,7 @@ async def publish_listing(
     category_id: str = "15724",
     country: str = "US",
     postal_code: str = "95125",
-    condition_id: str = "3000",
+    condition_id: str = "1000",
     dry_run: bool = True,
     sandbox: bool = True,
 ) -> PublishResponse:
@@ -205,6 +210,7 @@ async def publish_listing(
         condition_id=condition_id,
         quantity=1,
         item_specifics=draft.ebay_item_specifics or None,
+        picture_url=draft.image_url or None,
     )
 
     headers = {
@@ -251,9 +257,18 @@ async def publish_listing(
     item_id = _quick_tag(body, "ItemID")
     errors = _extract_errors(body)
 
+    # Drop pure-Warning entries when the listing succeeded — they are eBay
+    # deprecation notices (e.g. collectibles grading aspects) that don't
+    # affect the listing and would confuse the frontend into showing an error.
+    success = ack in ("Success", "Warning") and bool(item_id)
+    visible_errors = (
+        [e for e in errors if e.get("severity", "").lower() != "warning"]
+        if success else errors
+    )
+
     return PublishResponse(
         ack=ack,
-        item_id=item_id if ack in ("Success", "Warning") else None,
-        errors=[{k: str(v) for k, v in e.items()} for e in errors],
-        sandbox_url=_sandbox_listing_url(item_id) if (sandbox and ack in ("Success", "Warning")) else None,
+        item_id=item_id if success else None,
+        errors=[{k: str(v) for k, v in e.items()} for e in visible_errors],
+        sandbox_url=_sandbox_listing_url(item_id) if (sandbox and success) else None,
     )

@@ -88,6 +88,14 @@ async def draft_listing(body: ListingDraftRequest) -> ListingDraftResponse:
         logger.exception("Gemini listing copy failed")
         raise HTTPException(status_code=502, detail=f"Gemini listing copy error: {exc}") from exc
 
+    # Attach a public image URL for eBay PictureDetails if the garment has one.
+    # Use the ngrok/tunnel base if configured, otherwise fall back to local.
+    garment_image_path = raw_garment.get("image_url", "")
+    if garment_image_path and garment_image_path.startswith("/"):
+        public_base = (settings.ngrok_url or "http://127.0.0.1:8000").rstrip("/")
+        bypass = "?ngrok-skip-browser-warning=1" if settings.ngrok_url else ""
+        draft.image_url = f"{public_base}{garment_image_path}{bypass}"
+
     session.listing_draft = draft.model_dump()
     session.price_band = price_band.model_dump()
 
@@ -111,7 +119,11 @@ async def publish_listing(body: PublishRequest) -> PublishResponse:
     draft = ListingDraft(**session.listing_draft)
 
     raw_garment = session.garments.get(body.garment_id) or session.garments.get(draft.garment_id)
-    condition_id = (raw_garment or {}).get("condition_id", "3000") if raw_garment else "3000"
+    condition_id = (
+        body.condition_id
+        or (raw_garment or {}).get("condition_id", "2500")
+        if raw_garment else body.condition_id or "2500"
+    )
 
     try:
         result = await ebay.publish_listing(
