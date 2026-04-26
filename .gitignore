@@ -33,6 +33,9 @@ my_todos.txt
 # --- Local functional / integration workbench (not part of shipped backend) ---
 func_test/
 
+# --- Pioneer training script output (job metadata, local JSONL snapshots) ---
+scripts/pioneer/out/
+
 # --- Runtime artifacts served under /static ---
 # Only canonical fallback assets are shipped (cinematic TTS, hero JPG/MP4, fallback JSONs).
 # Everything else under /static is per-session demo data and must NOT be committed.

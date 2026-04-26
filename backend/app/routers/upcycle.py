@@ -185,6 +185,27 @@ async def animate_upcycle(body: AnimateRequest) -> AnimateResponse:
             detail="image_url missing and session has no upcycle_image_url. Call /v1/upcycle/generate first.",
         )
 
+    # fal.ai requires a full HTTPS URL (not a relative /static/... path).
+    # When the image was cached locally we stored a relative URL — resolve it
+    # to the absolute local file path and re-upload to fal CDN first.
+    if image_url.startswith("/static/"):
+        # fal.ai requires a full HTTPS URL or a data URI — not a relative path.
+        # Convert the locally-cached image to a base64 data URI (more reliable
+        # than re-uploading to fal CDN, which can 500 on their v3 storage endpoint).
+        relative_parts = image_url.removeprefix("/static/")
+        local_file = cache.STATIC_DIR / relative_parts
+        if local_file.is_file():
+            import base64
+            mime = "image/jpeg" if local_file.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+            b64 = base64.b64encode(local_file.read_bytes()).decode()
+            image_url = f"data:{mime};base64,{b64}"
+            logger.info("Converted local upcycle image to data URI (%d bytes)", len(b64))
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Local upcycle image not found at {local_file}. Re-run /v1/upcycle/generate.",
+            )
+
     cache_path = cache.session_video_path(session.session_id)
     if cache_path.exists() and cache_path.stat().st_size > 0:
         session.upcycle_video_url = cache.session_video_url(session.session_id)

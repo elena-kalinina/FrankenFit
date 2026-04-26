@@ -4,17 +4,22 @@ Pioneer (Fastino Labs) service — backend implementation.
 Ported from func_test/test_pioneer_finetune_loop.py.
 
 Demo narrative (beat 8 on stage):
-  Day 1 (live):   Qwen model (PIONEER_QWEN_MODEL) handles love/meh/hate
+  Day 1 (live):   Qwen model (PIONEER_QWEN_MODEL) handles love/hate
                   inference — strong zero-shot predictions, impressive on stage.
   Overnight:      LoRA fine-tune on fastino/gliner2-base-v1 trains from
-                  the user's swipe JSONL. Proven: deployed in ~145 s.
+                  the user's swipe JSONL (binary love/hate signal).
+                  Proven: deployed in ~145 s.
   Day 2 side-by-side: Qwen (big, generic) vs fine-tuned GLiNER (task-
                   specific, 10× smaller). Pitch: same task, fraction of the
                   cost — "models that trained themselves on YOUR taste."
 
+The classifier is BINARY: `love` (would keep / buy) and `hate` (would toss).
+That mirrors the actual swipe UX (LIKE / DISLIKE) — collecting a `meh` middle
+class confuses the model and can't be produced by the user, so we drop it.
+A `meh` value can still show up as a defensive fallback if a chat-completion
+response from a generic decoder model fails to parse — treat it as "uncertain".
+
 GLiNER handles the classifier layer only; Gemini stays on copy generation.
-Side-by-side is an efficiency win (size/cost), not accuracy win — both
-models should agree on the label for credibility.
 """
 
 from __future__ import annotations
@@ -30,18 +35,23 @@ from backend.app.models import ClassifyResponse
 
 logger = logging.getLogger(__name__)
 
-LABELS = ["love", "meh", "hate"]
+# Schema we send to Pioneer's /inference and the chat system prompt.
+# BINARY by design — see the module docstring.
+LABELS = ["love", "hate"]
+# Defensive parse-fallback label, used only if the response can't be mapped
+# to a real LABELS value. Never sent to the model as part of its schema.
+PARSE_FALLBACK_LABEL = "meh"
 DEFAULT_API_BASE = "https://api.pioneer.ai"
 
 # Pioneer's GLiNER encoder responses do NOT carry a confidence score — only
 # the category, token counts and latency. To give the side-by-side UI something
 # to render we synthesize a plausible confidence per label. These are display-
-# only values, calibrated so "love" / "hate" feel committed and "meh" feels
-# uncertain — matching how the encoder actually behaves on stage.
+# only values, calibrated so "love" / "hate" feel committed; "meh" only shows
+# up on a parse failure and is rendered with a low (uncertain) confidence.
 SYNTHETIC_CONFIDENCE: dict[str, float] = {
     "love": 0.92,
     "hate": 0.87,
-    "meh": 0.58,
+    "meh": 0.55,
 }
 
 # Always-on fallback baseline. The un-tuned base model used to seed the LoRA
@@ -78,28 +88,31 @@ def _is_decoder_model(model_id: str) -> bool:
 
 _CLASSIFY_SYSTEM_PROMPT = (
     "You are a fashion preference classifier. "
-    "Given a garment description, decide if the user would LOVE it, feel MEH about it, "
-    "or HATE it based on its style, era, fabric, vibe.\n\n"
+    "Given a garment description, decide if a tasteful, style-conscious user would "
+    "LOVE it (would keep or buy) or HATE it (would toss).\n\n"
     "Rules:\n"
-    "- Reply with EXACTLY ONE token: love, meh, or hate. Lowercase. No punctuation.\n"
+    "- Reply with EXACTLY ONE token: love or hate. Lowercase. No punctuation.\n"
     "- No preamble, no explanation, no quotes, no JSON.\n"
-    "- 'love' = bold, well-made, statement piece a stylish person would keep.\n"
-    "- 'hate' = dated, fast-fashion, off-trend, or generally tasteless.\n"
-    "- 'meh' = forgettable basics, unclear vibe, or anything in between."
+    "- You must commit to one of the two; do not hedge.\n"
+    "- 'love' = bold, well-made, era-defining, statement piece, considered choice.\n"
+    "- 'hate' = dated, fast-fashion, off-trend, gimmicky, or generally tasteless."
 )
 
 
 def _label_from_chat_content(content: str) -> tuple[str, float | None]:
-    """Extract a love/meh/hate label from a Qwen chat-completion response."""
+    """Extract a love/hate label from a chat-completion response.
+
+    Falls back to PARSE_FALLBACK_LABEL ("meh") only when the response is empty
+    or cannot be matched to a real LABELS value — that should never happen in
+    practice given the strict system prompt, but we surface it cleanly so the
+    UI can render an "uncertain" pill instead of crashing.
+    """
     if not content:
-        return "meh", None
+        return PARSE_FALLBACK_LABEL, SYNTHETIC_CONFIDENCE[PARSE_FALLBACK_LABEL]
     lc = content.strip().lower()
-    # Fast path: response is just the bare label.
     if lc in LABELS:
         return lc, SYNTHETIC_CONFIDENCE.get(lc)
-    # Sometimes the model wraps it: "love.", "**love**", "the answer is hate", etc.
     for candidate in LABELS:
-        # Word-boundary scan to avoid "lover" → "love".
         token = candidate
         idx = lc.find(token)
         if idx == -1:
@@ -108,7 +121,7 @@ def _label_from_chat_content(content: str) -> tuple[str, float | None]:
         after = lc[idx + len(token)] if idx + len(token) < len(lc) else " "
         if not before.isalnum() and not after.isalnum():
             return candidate, SYNTHETIC_CONFIDENCE.get(candidate)
-    return "meh", SYNTHETIC_CONFIDENCE["meh"]
+    return PARSE_FALLBACK_LABEL, SYNTHETIC_CONFIDENCE[PARSE_FALLBACK_LABEL]
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -131,7 +144,7 @@ def _label_from_inference(raw: dict[str, Any]) -> tuple[str, float | None]:
     SYNTHETIC_CONFIDENCE.
     """
     if not isinstance(raw, dict):
-        return "meh", None
+        return PARSE_FALLBACK_LABEL, None
 
     # Layout 0: encoder { result: { category } } — Pioneer GLiNER, the path
     # we hit most on stage. Confirmed in func_test/out/last_pioneer_sidebyside.json.
@@ -174,7 +187,7 @@ def _label_from_inference(raw: dict[str, Any]) -> tuple[str, float | None]:
         if candidate in text:
             return candidate, None
 
-    return "meh", None
+    return PARSE_FALLBACK_LABEL, None
 
 
 def _label_with_synthetic_confidence(raw: dict[str, Any]) -> tuple[str, float | None]:
@@ -435,7 +448,7 @@ async def classify_preference_sidebyside(
     if isinstance(baseline_raw, dict):
         baseline_label, baseline_conf = _label_with_synthetic_confidence(baseline_raw)
 
-    trained_label = "meh"
+    trained_label = PARSE_FALLBACK_LABEL
     trained_conf: float | None = None
     if isinstance(trained_raw, dict):
         trained_label, trained_conf = _label_with_synthetic_confidence(trained_raw)
@@ -488,8 +501,10 @@ def append_live_swipe(
     import json
 
     if label not in LABELS:
-        # Re-map the swipe direction → preference label.
-        label = {"like": "love", "dislike": "hate"}.get(label, "meh")
+        # Re-map the swipe direction → preference label. Anything unrecognized
+        # collapses into the parse-fallback so the JSONL never accumulates rows
+        # the trained model was never exposed to.
+        label = {"like": "love", "dislike": "hate"}.get(label, PARSE_FALLBACK_LABEL)
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     row = {"text": garment_text.strip(), "label": label}
     with jsonl_path.open("a", encoding="utf-8") as f:

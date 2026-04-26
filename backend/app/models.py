@@ -211,7 +211,7 @@ class AnimateRequest(BaseModel):
     duration: int = Field(default=6, description="Clip duration in seconds (model-dependent valid set).")
     aspect_ratio: str = Field(default="9:16")
     timeout_seconds: float = Field(
-        default=60.0,
+        default=180.0,
         description="Upper bound on the live render. On timeout the cached generic MP4 is served instead.",
     )
 
@@ -240,7 +240,13 @@ class ClassifyRequest(BaseModel):
 
 class ClassifyResponse(BaseModel):
     garment_id: str
-    label: str = Field(description="Predicted preference label: love, meh, or hate.")
+    label: str = Field(
+        description=(
+            "Predicted preference label. The trained classifier is BINARY (love | hate) "
+            "and matches the swipe UX. 'meh' may appear only as a defensive parse-fallback "
+            "from a generic decoder model and should be rendered as 'uncertain'."
+        ),
+    )
     confidence: float | None = None
     model_id: str
     baseline_label: str | None = Field(

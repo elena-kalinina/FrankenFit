@@ -95,6 +95,8 @@ async def _on_startup() -> None:
     print(f"[startup] cinematic clips: {clip_status}")
 
 
+import mimetypes
+mimetypes.add_type("audio/wav", ".wav")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 app.include_router(health.router)

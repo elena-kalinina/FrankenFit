@@ -39,6 +39,8 @@ Resilience built in (because this runs on stage):
 | `backend/static/tts/cinematic/` | 4 pre-rendered cinematic voice lines (`cold_open`, `upcycle_reveal`, `rejected_upcycle`, `resale_cheer`) |
 | `backend/static/{upcycle,video}/upcycle_hero.{jpg,mp4}` | Canonical fallback hero still and animated reveal — used when fal.ai is slow or offline |
 | `scripts/prime_demo_cache.py` | End-to-end orchestrator that hits every endpoint and primes the local caches |
+| `scripts/pioneer/train.py` | Pioneer Day-1→Day-2 fine-tune loop (dataset → train → poll → eval → infer) |
+| `scripts/pioneer/probe.py` | Quick side-by-side inference against any two Pioneer models |
 | `docs/demo_garment_dataset.md` | How to prepare the 4-likes / 3-dislikes demo photoset for the best taste signal |
 | `test_api/` | Lightweight provider connectivity smoke tests (Gemini, Tavily, Pioneer, end-to-end) |
 
@@ -82,6 +84,49 @@ The startup banner prints the last 6 chars of every loaded API key — use this 
 | `GET`  | `/static/...` | Uploaded photos, generated upcycle stills + videos, garment TTS, cinematic clips, fallback JSONs |
 
 The exact request/response shapes are in `backend/app/models.py`. Paste them straight into the frontend prompts; do not rely on the OpenAPI spec for the Pydantic field descriptions — those describe behavior the spec doesn't capture (e.g. *"empty until the async render finishes; silently 404-skip"*).
+
+---
+
+## Pioneer — Day-1 → Day-2 fine-tune loop
+
+The `scripts/pioneer/` module implements the hackathon's most compelling pitch beat: the app collects real taste signals during Day-1 usage (every swipe writes a row to `func_test/out/live_swipes.jsonl`), then overnight a LoRA fine-tune trains a task-specific binary classifier on those rows. Day-2 shows Qwen (7B, generic) vs fine-tuned GLiNER 2 (compact, your taste) side-by-side on the same garment.
+
+### Classifier design
+
+- **Binary labels** — `love` / `hate`, matching the swipe UX exactly. No `meh` class: users can never produce a neutral signal, so training on it only blurs the decision boundary.
+- **Base model**: `fastino/gliner2-base-v1` (encoder, task-specific, ~10× smaller than Qwen).
+- **Training type**: LoRA, 5 epochs, lr=5e-5. Typically deploys in ~2–5 min on Pioneer.
+
+### Seed dataset
+
+Three sources are merged, normalised, and deduped automatically:
+
+| File | Rows | Notes |
+|---|---|---|
+| `func_test/out/preference-training-data.jsonl` | 50 | Hand-curated binary labels |
+| `func_test/out/pioneer_style_dataset.jsonl` | 10 | Editorial seed rows |
+| `func_test/out/live_swipes.jsonl` | grows | Auto-collected from `POST /v1/wardrobe/swipe` |
+
+### Running the loop
+
+```bash
+# Full pipeline — dataset → train → poll → eval → side-by-side infer
+# (use --skip-generate to skip Pioneer's /generate and go straight to training)
+python -m scripts.pioneer.train --phase=all --skip-generate --dataset-name=frankenfit-binary-v3
+
+# Or phase-by-phase:
+python -m scripts.pioneer.train --phase=train  --dataset-name=frankenfit-binary-v3
+python -m scripts.pioneer.train --phase=poll
+python -m scripts.pioneer.train --phase=eval
+python -m scripts.pioneer.train --phase=infer  --base-model=$PIONEER_QWEN_MODEL
+
+# Quick side-by-side probe (no training needed):
+python -m scripts.pioneer.probe "Y2K bedazzled bell sleeve top with rhinestones"
+```
+
+After training, set `PIONEER_TRAINED_MODEL_ID=<training_job_id>` in `.env`. The backend's `/v1/preferences/classify` endpoint will route the new model automatically.
+
+Job metadata and local JSONL snapshots are saved to `scripts/pioneer/out/` (gitignored).
 
 ---
 

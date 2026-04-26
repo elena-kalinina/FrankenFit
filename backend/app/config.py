@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # --- Core partners ---
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
     gemini_vision_model: str = Field(
-        default="gemini-3-flash-preview",
+        default="gemini-3.1-flash-lite-preview",
         alias="GEMINI_VISION_MODEL",
         description=(
             "Primary vision + text Gemini model. Default is gemini-3-flash-preview "
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
         ),
     )
     gemini_vision_fallback_models_csv: str = Field(
-        default="gemini-3.1-flash-lite-preview,gemini-2.5-flash",
+        default="gemini-2.5-flash",
         alias="GEMINI_VISION_FALLBACK_MODELS",
         description=(
             "Comma-separated chain of vision/text fallback models. Walked left-to-right "
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     def gemini_vision_fallback_models(self) -> list[str]:
         return [m.strip() for m in self.gemini_vision_fallback_models_csv.split(",") if m.strip()]
     gemini_tts_model: str = Field(
-        default="gemini-2.5-flash-preview-tts",
+        default="gemini-3.1-flash-tts-preview",
         alias="GEMINI_TTS_MODEL",
         description=(
             "Primary Gemini TTS model. All preview-tier TTS models live on tiny "
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
         ),
     )
     gemini_tts_fallback_models_csv: str = Field(
-        default="gemini-3.1-flash-tts-preview,gemini-2.5-pro-preview-tts",
+        default="gemini-2.5-flash-preview-tts,gemini-2.5-pro-preview-tts",
         alias="GEMINI_TTS_FALLBACK_MODELS",
         description=(
             "Comma-separated TTS fallback chain. Walked left-to-right when the "
